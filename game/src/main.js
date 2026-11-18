@@ -93,6 +93,12 @@ function runGame() {
     announce(won ? `Victory! Score ${world.state.score}. Best ${best}.` : `Game over. Score ${world.state.score}. Best ${best}.`);
   }
 
+  function startEndless() {
+    if (!world.startEndless()) return;
+    screen = SCREEN_PLAY;
+    announce(`Endless mode — wave ${world.state.wave + 1} next. How long can the light hold?`);
+  }
+
   function handleEvents(events) {
     if (events & EVENT_KILL) audio.sfx.kill();
     if (events & EVENT_CHAIN) audio.sfx.zap();
@@ -184,6 +190,13 @@ function runGame() {
       return;
     }
     if (screen === SCREEN_OVER || screen === SCREEN_WON) {
+      // On victory, the Endless button (or E) keeps the run going instead of restarting.
+      const click = input.takeClick();
+      if (screen === SCREEN_WON && click && lastShop) {
+        const hit = renderer.hitTest(click.x, click.y, world.state, ui(), lastShop, SCREEN_WON);
+        if (hit && hit.kind === 'endless') { audio.unlock(); startEndless(); return; }
+      }
+      if (screen === SCREEN_WON && input.takeDifficultyKey() === 'ember') { audio.unlock(); startEndless(); return; }
       if (actions & ACTION_CONFIRM) { audio.unlock(); startGame(); }
       return;
     }

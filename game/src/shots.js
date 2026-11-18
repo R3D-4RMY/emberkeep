@@ -26,14 +26,14 @@ function playWaves(world, targetWave, maxSeconds) {
 export function stageShot(name, world) {
   world.reset();
   if (name === 'play') {
-    // Clear waves 1-3, plant a Volt Coil if none stands, then play wave 4 partway
+    // Clear waves 1-3, plant an Ember Lance if none stands, then play wave 4 partway
     // until the combo meter is lit — the frame shows the new tower and the combo HUD.
     world.autoSpend();
     playWaves(world, 3, 240);
-    if (!world.state.towers.some((t) => t.type === 'volt')) {
-      world.state.gold = Math.max(world.state.gold, 120);
+    if (!world.state.towers.some((t) => t.type === 'snipe')) {
+      world.state.gold = Math.max(world.state.gold, 140);
       const empty = [...world.state.towers].filter((t) => !t.type).sort((a, b) => Math.abs(a.x - 640) - Math.abs(b.x - 640))[0];
-      if (empty) world.buildTower(empty.pad, 'volt');
+      if (empty) world.buildTower(empty.pad, 'snipe');
     }
     world.autoSpend();
     world.startWave();

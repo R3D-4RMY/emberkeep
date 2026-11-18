@@ -14,7 +14,7 @@ const PAUSE = new Set(['KeyP', 'Escape']);
 const MUTE = new Set(['KeyM']);
 const RESTART = new Set(['KeyR']);
 const SPEED = new Set(['KeyF']);
-const TOWER_KEYS = { Digit1: 'spark', Digit2: 'ember', Digit3: 'frost', Digit4: 'volt', Numpad1: 'spark', Numpad2: 'ember', Numpad3: 'frost', Numpad4: 'volt' };
+const TOWER_KEYS = { Digit1: 'spark', Digit2: 'ember', Digit3: 'frost', Digit4: 'volt', Digit5: 'snipe', Numpad1: 'spark', Numpad2: 'ember', Numpad3: 'frost', Numpad4: 'volt', Numpad5: 'snipe' };
 const DIFFICULTY_KEYS = { KeyC: 'chill', KeyN: 'normal', KeyE: 'ember' };
 
 export function createInput(canvas, toField) {

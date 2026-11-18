@@ -12,9 +12,10 @@ export const SCREEN_WON = 'won';
 
 const PANEL = { width: 800, top: 150, line: 32, bottom: 76 };
 const SHOP = { y: 656, height: 64 };
-const CARD_W = 165;
-const CARD_GAP = 10;
+const CARD_W = 140;
+const CARD_GAP = 8;
 let titleButtons = [];
+let endlessButton = null;
 
 /** Fixed starfield, so the sky looks the same every run. */
 const STARS = [];
@@ -184,6 +185,17 @@ export function createRenderer(canvas) {
         context.fillStyle = def.dark;
         context.fillRect(t.x - 10, t.y - 2, 4, 10);
         context.fillRect(t.x + 6, t.y - 2, 4, 10);
+      } else if (t.type === 'snipe') {
+        // The Lance: a long thin barrel with a scope glint.
+        context.save();
+        context.translate(t.x, t.y - 6);
+        context.rotate(t.angle);
+        context.fillStyle = def.dark;
+        context.fillRect(0, -2.5, 36, 5);
+        context.fillStyle = '#fef9c3';
+        context.fillRect(30, -2.5, 6, 5);
+        context.restore();
+        circle(t.x, t.y - 6, 4, '#fef9c3');
       } else {
         // Barrel pointing at the target.
         context.save();
@@ -224,6 +236,23 @@ export function createRenderer(canvas) {
         context.arc(e.x, e.y, e.radius + 4, 0, Math.PI * 2);
         context.stroke();
       }
+      if (e.kind === 'mender') {
+        // The healer wears a green cross.
+        context.fillStyle = '#bbf7d0';
+        context.fillRect(e.x - 2, e.y - 9, 4, 14);
+        context.fillRect(e.x - 7, e.y - 4, 14, 4);
+      }
+      if (e.kind === 'swarmer') {
+        // Swarmers are spiky little darts.
+        context.strokeStyle = def.dark;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(e.x - e.radius, e.y);
+        context.lineTo(e.x + e.radius, e.y);
+        context.moveTo(e.x, e.y - e.radius);
+        context.lineTo(e.x, e.y + e.radius);
+        context.stroke();
+      }
       if (e.kind === 'warden') {
         // The mini-boss wears a crown of embers.
         context.fillStyle = '#fde047';
@@ -260,6 +289,18 @@ export function createRenderer(canvas) {
     for (const p of state.projectiles) {
       if (!p.active) continue;
       const def = TOWERS[p.type];
+      // Trail: a short fading line back along the flight path.
+      const dx = p.tx - p.x;
+      const dy = p.ty - p.y;
+      const d = Math.hypot(dx, dy) || 1;
+      context.strokeStyle = def.color;
+      context.globalAlpha = 0.45;
+      context.lineWidth = p.type === 'ember' ? 5 : 3;
+      context.beginPath();
+      context.moveTo(p.x - (dx / d) * 16, p.y - (dy / d) * 16);
+      context.lineTo(p.x, p.y);
+      context.stroke();
+      context.globalAlpha = 1;
       circle(p.x, p.y, p.type === 'ember' ? 7 : 5, def.color);
       circle(p.x, p.y, 2.5, '#ffffff');
     }
@@ -295,14 +336,14 @@ export function createRenderer(canvas) {
       context.fillStyle = '#fde047';
       context.fillRect(420, 38, 120 * Math.max(0, state.comboTimer / 2.5), 5);
     }
-    const waveText = screen === SCREEN_TITLE || state.wave === 0 ? 'Wave –/10' : waveLabel(state.wave) + ` / ${WAVES}`;
+    const waveText = screen === SCREEN_TITLE || state.wave === 0 ? 'Wave –/10' : (state.endless ? `Wave ${state.wave} ∞` : waveLabel(state.wave) + ` / ${WAVES}`);
     text(waveText, 770, 12, 26, PALETTE.text, 'center', 'top');
     text(livesLabel(state.lives), 1260, 12, 26, state.lives <= 5 ? PALETTE.lives : PALETTE.text, 'right', 'top');
     if (screen === SCREEN_TITLE) return;
     if (state.waveActive) {
       const remaining = state.waveQueue.length + state.enemies.filter((e) => e.active).length;
       text(`Enemies left: ${remaining}`, 640, 38, 14, PALETTE.muted, 'center', 'top');
-    } else if (!state.won && !state.lost && state.wave < WAVES) {
+    } else if (!state.won && !state.lost && (state.wave < WAVES || state.endless)) {
       text('Build phase — press Space to send the next wave', 640, 38, 14, PALETTE.gold, 'center', 'top');
     }
     text(DIFFICULTY[state.difficulty].name, 1060, 38, 13, PALETTE.muted, 'right', 'top');
@@ -312,7 +353,8 @@ export function createRenderer(canvas) {
 
   /** Build-phase panel: what the next wave brings, so the player can plan. */
   function drawWavePreview(state, screen) {
-    if (screen !== SCREEN_PLAY || state.waveActive || state.won || state.lost || state.wave >= WAVES) return;
+    if (screen !== SCREEN_PLAY || state.waveActive || state.won || state.lost) return;
+    if (state.wave >= WAVES && !state.endless) return;
     const next = state.wave + 1;
     const comp = waveComposition(next);
     const x = 1000;
@@ -380,7 +422,7 @@ export function createRenderer(canvas) {
     const waveX = 16 + TOWER_ORDER.length * (CARD_W + CARD_GAP) + 8;
     const waveW = 150;
     const waveY = SHOP.y + 6;
-    const canWave = !state.waveActive && !state.won && !state.lost && state.wave < WAVES;
+    const canWave = !state.waveActive && !state.won && !state.lost && (state.wave < WAVES || state.endless);
     context.fillStyle = canWave ? '#b45309' : '#334155';
     context.fillRect(waveX, waveY, waveW, 52);
     text(canWave ? '▶  Start wave [Space]' : state.won ? 'Victory!' : state.lost ? 'Fallen…' : 'Wave running…', waveX + waveW / 2, waveY + 30, 14, '#fff7d6', 'center');
@@ -430,11 +472,11 @@ export function createRenderer(canvas) {
   /** Title screen: the pitch, the tower roster, and the difficulty pick. */
   function drawTitle(state, best, ui) {
     const lines = [
-      'Lantern Defense — hold the road for 10 waves.',
-      'Click a pad, pick a tower (1 / 2 / 3 / 4), then send the wave.',
-      'Spark is fast · Ember splashes · Frost slows · Volt chains lightning.',
+      'Lantern Defense — hold the road for 10 waves, then keep going in Endless.',
+      'Click a pad, pick a tower (1 / 2 / 3 / 4 / 5), then send the wave.',
+      'Spark is fast · Ember splashes · Frost slows · Volt chains · Lance snipes far.',
       'Kills in a row build a combo — up to x2.00 score and bonus gold.',
-      'Wave 5 hides the Cinder Warden, wave 10 the Ember Golem.',
+      'Wave 5: Cinder Warden · Wave 10: Ember Golem · Menders heal · Swarmers swarm.',
       best > 0 ? bestLabel(best) : 'No keeper has held the light yet.',
     ];
     const btnW = 240;
@@ -445,6 +487,14 @@ export function createRenderer(canvas) {
     const y = (FIELD.height - height) / 2;
     context.fillStyle = 'rgba(10,14,28,0.72)';
     context.fillRect(0, 0, FIELD.width, FIELD.height);
+    // Rising embers drift up around the panel, lit by the lantern's glow.
+    for (let i = 0; i < 18; i += 1) {
+      const ex = 40 + ((i * 197) % 1200);
+      const ey = 700 - ((state.time * 22 + i * 53) % 700);
+      context.globalAlpha = 0.25 + 0.3 * Math.sin(state.time * 2 + i);
+      circle(ex, ey, 2 + (i % 3), i % 2 ? '#ffb703' : '#ff6b35');
+    }
+    context.globalAlpha = 1;
     context.fillStyle = PALETTE.panel;
     context.fillRect(x, y, PANEL.width, height);
     context.strokeStyle = PALETTE.panelEdge;
@@ -485,7 +535,7 @@ export function createRenderer(canvas) {
       `Total: ${state.score.toLocaleString()} pts`,
     ];
     const rowH = 21;
-    const height = 84 + breakdown.length * 27 + 30 + stats.length * rowH + 92;
+    const height = 84 + breakdown.length * 27 + 30 + stats.length * rowH + 150;
     const x = (FIELD.width - PANEL.width) / 2;
     const y = Math.max(8, (FIELD.height - height) / 2);
     context.fillStyle = 'rgba(10,14,28,0.72)';
@@ -509,7 +559,15 @@ export function createRenderer(canvas) {
       const vals = [`Wave ${s.wave}`, String(s.kills), String(s.leaks), `+${s.gold}g`, String(s.score)];
       for (let c = 0; c < cols.length; c += 1) text(vals[c], cols[c], tableY + 8 + (i + 1) * rowH, 15, PALETTE.text, 'center');
     }
-    text(bestLabel(best), FIELD.width / 2, y + height - 44, 18, PALETTE.muted, 'center');
+    text(bestLabel(best), FIELD.width / 2, y + height - 92, 18, PALETTE.muted, 'center');
+    // Endless mode: keep playing past wave 10, waves scaling forever.
+    endlessButton = { x: FIELD.width / 2 - 170, y: y + height - 82, w: 340, h: 42 };
+    context.fillStyle = '#b45309';
+    context.fillRect(endlessButton.x, endlessButton.y, endlessButton.w, endlessButton.h);
+    context.strokeStyle = PALETTE.gold;
+    context.lineWidth = 2;
+    context.strokeRect(endlessButton.x, endlessButton.y, endlessButton.w, endlessButton.h);
+    text('▶  Keep playing — Endless mode [E]', FIELD.width / 2, endlessButton.y + 28, 18, '#fff7d6', 'center');
     text('Press Space or R to play again', FIELD.width / 2, y + height - 16, 17, PALETTE.gold, 'center');
   }
 
@@ -542,7 +600,9 @@ export function createRenderer(canvas) {
     } else if (screen === SCREEN_OVER) {
       drawPanel('The light went out', [
         finalLabel(state.score),
-        `You held to wave ${state.wave} of ${WAVES} · ${state.kills} invaders felled`,
+        state.endless
+          ? `You held to wave ${state.wave} in Endless · ${state.kills} invaders felled`
+          : `You held to wave ${state.wave} of ${WAVES} · ${state.kills} invaders felled`,
         bestLabel(best),
       ], 'Press Space or R to try again');
     } else if (screen === SCREEN_WON) {
@@ -558,6 +618,9 @@ export function createRenderer(canvas) {
         if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return { kind: 'difficulty', key: b.key };
       }
       return { kind: 'title' };
+    }
+    if (screen === SCREEN_WON && endlessButton) {
+      if (x >= endlessButton.x && x <= endlessButton.x + endlessButton.w && y >= endlessButton.y && y <= endlessButton.y + endlessButton.h) return { kind: 'endless' };
     }
     if (y >= SHOP.y) {
       for (let i = 0; i < TOWER_ORDER.length; i += 1) {

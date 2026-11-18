@@ -43,7 +43,7 @@ function dist(ax, ay, bx, by) {
 export function createWorld(random) {
   const enemies = [];
   for (let i = 0; i < POOL.enemies; i += 1) {
-    enemies.push({ active: false, kind: 'mote', x: 0, y: 0, hp: 1, maxHp: 1, speed: 0, radius: 10, reward: 0, leak: 1, slow: 0, slowTime: 0, seg: 0, progress: 0, flash: 0 });
+    enemies.push({ active: false, kind: 'mote', x: 0, y: 0, hp: 1, maxHp: 1, speed: 0, radius: 10, reward: 0, leak: 1, slow: 0, slowTime: 0, seg: 0, progress: 0, flash: 0, healTimer: 0 });
   }
   const projectiles = [];
   for (let i = 0; i < POOL.projectiles; i += 1) {
@@ -63,7 +63,7 @@ export function createWorld(random) {
     towers, enemies, projectiles, particles, texts,
     gold: START.gold, lives: START.lives, score: 0, kills: 0,
     wave: 0, waveActive: false, waveQueue: [], spawnTimer: 0, spawnGap: 0.7,
-    time: 0, won: false, lost: false, buildPhase: true,
+    time: 0, won: false, lost: false, buildPhase: true, endless: false,
     difficulty: 'normal',
     combo: 0, comboTimer: 0, comboBest: 0, comboMilestone: 0,
     shake: 0,
@@ -94,6 +94,7 @@ export function createWorld(random) {
     state.won = false;
     state.lost = false;
     state.buildPhase = true;
+    state.endless = false;
     state.combo = 0; state.comboTimer = 0; state.comboBest = 0; state.comboMilestone = 0;
     state.shake = 0;
     state.waveStats = []; state.waveKills = 0; state.waveLeaks = 0; state.waveGold = 0; state.waveScore = 0;
@@ -139,11 +140,22 @@ export function createWorld(random) {
     e.maxHp = Math.round(def.hp * hpScale * diff.hp); e.hp = e.maxHp;
     e.speed = def.speed * diff.speed * (0.95 + random() * 0.1); e.radius = def.radius;
     e.reward = def.reward; e.leak = def.leak;
-    e.slow = 0; e.slowTime = 0; e.seg = 0; e.progress = 0; e.flash = 0;
+    e.slow = 0; e.slowTime = 0; e.seg = 0; e.progress = 0; e.flash = 0; e.healTimer = 0;
+  }
+
+  /** After victory, keep playing: waves beyond 10 scale up forever. */
+  function startEndless() {
+    if (!state.won || state.endless) return false;
+    state.endless = true;
+    state.won = false;
+    state.buildPhase = true;
+    state.gold += 150;
+    return true;
   }
 
   function startWave() {
-    if (state.waveActive || state.won || state.lost || state.wave >= WAVES) return false;
+    if (state.waveActive || state.won || state.lost) return false;
+    if (state.wave >= WAVES && !state.endless) return false;
     state.wave += 1;
     state.waveKills = 0; state.waveLeaks = 0; state.waveGold = 0; state.waveScore = 0;
     const comp = waveComposition(state.wave);
@@ -208,7 +220,7 @@ export function createWorld(random) {
       return empty[0];
     };
     let bought = 0;
-    for (const type of ['spark', 'ember', 'frost', 'volt']) {
+    for (const type of ['spark', 'ember', 'frost', 'volt', 'snipe']) {
       if (towers.some((t) => t.type === type)) continue;
       const pad = bestPad();
       if (!pad || state.gold < TOWERS[type].cost) continue;
@@ -266,7 +278,7 @@ export function createWorld(random) {
     state.gold += e.reward + bonusGold;
     state.waveGold += e.reward + bonusGold;
     floatText(e.x, e.y - e.radius - 6, `+${e.reward + bonusGold}g`, '#f2c94c');
-    burst(e.x, e.y, ENEMIES[e.kind].color, e.kind === 'golem' ? 26 : 9, 130);
+    burst(e.x, e.y, ENEMIES[e.kind].color, e.kind === 'golem' ? 40 : 14, 150);
     events |= EVENT_KILL;
     for (const milestone of [5, 10, 15, 20]) {
       if (state.combo === milestone && state.comboMilestone < milestone) {
@@ -285,7 +297,7 @@ export function createWorld(random) {
         m.x = e.x + (i === 0 ? -14 : 14); m.y = e.y;
         m.maxHp = Math.round(def.hp * waveHpScale(state.wave) * diff.hp * 0.6); m.hp = m.maxHp;
         m.speed = def.speed * diff.speed; m.radius = def.radius; m.reward = def.reward; m.leak = def.leak;
-        m.slow = 0; m.slowTime = 0; m.seg = e.seg; m.progress = e.progress; m.flash = 0;
+        m.slow = 0; m.slowTime = 0; m.seg = e.seg; m.progress = e.progress; m.flash = 0; m.healTimer = 0;
       }
     }
     return events;
@@ -339,6 +351,20 @@ export function createWorld(random) {
       if (!e.active) continue;
       if (e.flash > 0) e.flash -= dt;
       if (e.slowTime > 0) { e.slowTime -= dt; if (e.slowTime <= 0) e.slow = 0; }
+      // Menders knit nearby allies back together every 1.5 s.
+      if (ENEMIES[e.kind].healer) {
+        e.healTimer -= dt;
+        if (e.healTimer <= 0) {
+          e.healTimer = 1.5;
+          const heal = Math.round(4 + state.wave * 1.0);
+          let healed = false;
+          for (const a of enemies) {
+            if (!a.active || a === e || a.hp >= a.maxHp) continue;
+            if (dist(e.x, e.y, a.x, a.y) <= 130 + a.radius) { a.hp = Math.min(a.maxHp, a.hp + heal); healed = true; }
+          }
+          if (healed) burst(e.x, e.y, '#4ade80', 5, 50);
+        }
+      }
       const speed = e.speed * (1 - e.slow);
       let remaining = speed * dt;
       while (remaining > 0 && e.seg < PATH.length - 1) {
@@ -397,6 +423,7 @@ export function createWorld(random) {
           p.chainLeft = t.type === 'volt' ? t.level : 0;
           t.cooldown = 1 / towerRate(t.type, t.level);
           t.flash = 0.08;
+          burst(t.x + Math.cos(t.angle) * 26, t.y - 6 + Math.sin(t.angle) * 26, '#ffffff', 2, 40);
         }
       }
     }
@@ -462,7 +489,7 @@ export function createWorld(random) {
       state.waveStats.push({ wave: state.wave, kills: state.waveKills, leaks: state.waveLeaks, gold: state.waveGold, score: state.waveScore });
       floatText(LANTERN.x - 60, LANTERN.y - 60, `Wave ${state.wave} clear! +${bonus}g`, '#f2c94c');
       events |= EVENT_WAVE_CLEAR;
-      if (state.wave >= WAVES && !state.lost) {
+      if (state.wave >= WAVES && !state.endless && !state.lost) {
         state.won = true;
         state.score += state.lives * 50;
         events |= EVENT_WON;
@@ -473,5 +500,5 @@ export function createWorld(random) {
   }
 
   reset();
-  return { state, reset, step, startWave, buildTower, upgradeTower, sellTower, autoSpend, setDifficulty };
+  return { state, reset, step, startWave, startEndless, buildTower, upgradeTower, sellTower, autoSpend, setDifficulty };
 }
