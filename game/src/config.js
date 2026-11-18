@@ -10,6 +10,14 @@ export const STEP = 1 / 60;
 export const START = { gold: 170, lives: 20 };
 export const WAVES = 10;
 
+/** Difficulty: enemy hp/speed multipliers and starting gold. Normal is the old game. */
+export const DIFFICULTY = {
+  chill:  { key: 'chill',  name: 'Chill',  hp: 0.8,  speed: 0.9,  gold: 230, desc: 'Relaxed · 0.8x HP · 230g' },
+  normal: { key: 'normal', name: 'Normal', hp: 1,    speed: 1,    gold: 170, desc: 'The classic keep' },
+  ember:  { key: 'ember',  name: 'Ember',  hp: 1.25, speed: 1.1,  gold: 140, desc: 'Hard · 1.25x HP · 140g' },
+};
+export const DIFFICULTY_ORDER = ['chill', 'normal', 'ember'];
+
 /** The ember road the invaders march along, from the west gate to the lantern. */
 export const PATH = [
   { x: -40, y: 120 },
@@ -45,29 +53,41 @@ export const TOWERS = {
     damage: 4, rate: 1.3, range: 155, projectileSpeed: 520, slow: 0.45, slowTime: 1.6,
     color: '#7dd3fc', dark: '#0369a1', desc: 'Slows enemies',
   },
+  volt: {
+    key: 'volt', name: 'Volt Coil', cost: 110, upgradeCost: 85,
+    damage: 14, rate: 1.1, range: 165, projectileSpeed: 900, chain: 90, chainFalloff: 0.7,
+    color: '#fde047', dark: '#854d0e', desc: 'Chain lightning',
+  },
 };
-export const TOWER_ORDER = ['spark', 'ember', 'frost'];
+export const TOWER_ORDER = ['spark', 'ember', 'frost', 'volt'];
 export const MAX_LEVEL = 3;
 
-/** Enemy kinds. hp is scaled by wave; speed in px/s; reward in gold; leak in lives. */
+/** Enemy kinds. hp is scaled by wave; speed in px/s; reward in gold; leak in lives.
+ * splits: how many motes burst out on death. shieldVs: damage multiplier from one tower type. */
 export const ENEMIES = {
   mote:    { name: 'Mote',    hp: 22,  speed: 95,  radius: 11, reward: 6,  leak: 1, color: '#f472b6', dark: '#9d174d' },
   crawler: { name: 'Crawler', hp: 55,  speed: 62,  radius: 15, reward: 9,  leak: 1, color: '#a3e635', dark: '#3f6212' },
   brute:   { name: 'Brute',   hp: 170, speed: 38,  radius: 21, reward: 20, leak: 3, color: '#f97316', dark: '#7c2d12' },
   wisp:    { name: 'Wisp',    hp: 34,  speed: 130, radius: 12, reward: 11, leak: 1, color: '#c084fc', dark: '#581c87', slowResist: 0.6 },
   splitter:{ name: 'Splitter',hp: 80,  speed: 55,  radius: 17, reward: 13, leak: 2, color: '#38bdf8', dark: '#0c4a6e', splits: 2 },
+  spark:   { name: 'Spark',   hp: 14,  speed: 168, radius: 9,  reward: 5,  leak: 1, color: '#fde047', dark: '#854d0e', splits: 2 },
+  bulwark: { name: 'Bulwark', hp: 260, speed: 30,  radius: 22, reward: 24, leak: 3, color: '#94a3b8', dark: '#334155', shieldVs: { frost: 0.5 } },
+  warden:  { name: 'Cinder Warden', hp: 700, speed: 34, radius: 26, reward: 120, leak: 6, color: '#fb923c', dark: '#7c2d12' },
   golem:   { name: 'Ember Golem', hp: 2400, speed: 30, radius: 30, reward: 220, leak: 10, color: '#ef4444', dark: '#450a0a' },
 };
 
-/** Wave composition: [kind, count] pairs. Wave 10 is the boss wave. */
+/** Wave composition: [kind, count] pairs. Wave 5 has the Cinder Warden mini-boss, wave 10 the boss. */
 export function waveComposition(wave) {
   const w = wave;
   const list = [];
   list.push(['mote', 6 + w * 2]);
   list.push(['crawler', 3 + w]);
+  if (w >= 5) list.push(['spark', 1 + Math.floor((w - 2) / 2)]);
   if (w >= 3) list.push(['splitter', 1 + Math.floor(w / 3)]);
   if (w >= 4) list.push(['wisp', 2 + Math.floor(w / 2)]);
   if (w >= 5) list.push(['brute', 1 + Math.floor((w - 3) / 2)]);
+  if (w >= 6) list.push(['bulwark', 1 + Math.floor((w - 4) / 2)]);
+  if (w === 5) list.push(['warden', 1]);
   if (w === 10) list.push(['golem', 1]);
   return list;
 }
@@ -82,7 +102,7 @@ export function waveBonus(wave) {
   return 35 + wave * 10;
 }
 
-export const POOL = { enemies: 90, projectiles: 120, particles: 240, texts: 32 };
+export const POOL = { enemies: 110, projectiles: 140, particles: 240, texts: 48 };
 
 export const PALETTE = {
   backdrop: '#0b1020',

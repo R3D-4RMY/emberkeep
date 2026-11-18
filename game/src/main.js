@@ -8,7 +8,7 @@ import { BEST_KEY, STEP, TOWERS, WAVES } from './config.js';
 import { createRandom } from './random.js';
 import { createAudio } from './audio.js';
 import {
-  createWorld, EVENT_KILL, EVENT_LEAK, EVENT_LOST, EVENT_WAVE_CLEAR, EVENT_WON,
+  createWorld, EVENT_CHAIN, EVENT_COMBO, EVENT_KILL, EVENT_LEAK, EVENT_LOST, EVENT_WAVE_CLEAR, EVENT_WON,
 } from './world.js';
 import { ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, ACTION_RESTART, ACTION_SPEED, createInput } from './input.js';
 import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WON } from './render.js';
@@ -48,7 +48,7 @@ function runShot(name) {
   const scene = stageShot(name, world);
   let painted = 0;
   function paint() {
-    renderer.draw(world.state, scene.screen, scene.best, { selectedPad: null, selectedType: null, hover: null, speed: 1, muted: audio.isMuted() });
+    renderer.draw(world.state, scene.screen, scene.best, { selectedPad: null, selectedType: null, hover: null, speed: 1, muted: audio.isMuted(), difficulty: 'normal' });
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
     else window.__shotReady = true;
@@ -62,24 +62,26 @@ function runGame() {
   let best = readBest();
   let selectedPad = null;
   let selectedType = null;
+  let difficulty = 'normal';
   let speed = 1;
   let accumulator = 0;
   let last = performance.now();
   let lastShop = null;
 
-  const ui = () => ({ selectedPad, selectedType, hover: input.hover(), speed, muted: audio.isMuted() });
+  const ui = () => ({ selectedPad, selectedType, hover: input.hover(), speed, muted: audio.isMuted(), difficulty });
 
   function announce(message) {
     status.textContent = message;
   }
 
   function startGame() {
+    world.setDifficulty(difficulty);
     world.reset();
     selectedPad = null;
     selectedType = null;
     accumulator = 0;
     screen = SCREEN_PLAY;
-    announce(`Playing. Defend the lantern for ${WAVES} waves.`);
+    announce(`Playing on ${difficulty}. Defend the lantern for ${WAVES} waves.`);
   }
 
   function finish(won) {
@@ -93,6 +95,8 @@ function runGame() {
 
   function handleEvents(events) {
     if (events & EVENT_KILL) audio.sfx.kill();
+    if (events & EVENT_CHAIN) audio.sfx.zap();
+    if (events & EVENT_COMBO) { audio.sfx.combo(); announce(`Combo x${(1 + Math.min(world.state.combo, 20) * 0.05).toFixed(2)}!`); }
     if (events & EVENT_LEAK) { audio.sfx.leak(); announce(`A leak! ${world.state.lives} lantern lives left.`); }
     if (events & EVENT_WAVE_CLEAR) {
       audio.sfx.coin();
@@ -120,7 +124,7 @@ function runGame() {
   function handleClick(click) {
     if (!click || !lastShop) return;
     audio.unlock();
-    const hit = renderer.hitTest(click.x, click.y, world.state, ui(), lastShop);
+    const hit = renderer.hitTest(click.x, click.y, world.state, ui(), lastShop, screen);
     if (!hit) { selectedPad = null; selectedType = null; return; }
     if (hit.kind === 'shop') {
       selectedType = selectedType === hit.key ? null : hit.key;
@@ -158,9 +162,28 @@ function runGame() {
       selectedPad = null;
       audio.sfx.click();
     }
+    const difficultyKey = input.takeDifficultyKey();
+    if (difficultyKey && screen === SCREEN_TITLE) {
+      difficulty = difficultyKey;
+      audio.sfx.click();
+      announce(`Difficulty ${difficulty}.`);
+    }
     // Clicks are only meaningful on the play screen (and title/over to start).
     const click = input.takeClick();
-    if (screen === SCREEN_TITLE || screen === SCREEN_OVER || screen === SCREEN_WON) {
+    if (screen === SCREEN_TITLE) {
+      if (click && lastShop) {
+        const hit = renderer.hitTest(click.x, click.y, world.state, ui(), lastShop, SCREEN_TITLE);
+        if (hit && hit.kind === 'difficulty') {
+          difficulty = hit.key;
+          audio.sfx.click();
+          announce(`Difficulty ${difficulty}.`);
+          return;
+        }
+      }
+      if (actions & ACTION_CONFIRM) { audio.unlock(); startGame(); }
+      return;
+    }
+    if (screen === SCREEN_OVER || screen === SCREEN_WON) {
       if (actions & ACTION_CONFIRM) { audio.unlock(); startGame(); }
       return;
     }

@@ -14,11 +14,13 @@ const PAUSE = new Set(['KeyP', 'Escape']);
 const MUTE = new Set(['KeyM']);
 const RESTART = new Set(['KeyR']);
 const SPEED = new Set(['KeyF']);
-const TOWER_KEYS = { Digit1: 'spark', Digit2: 'ember', Digit3: 'frost', Numpad1: 'spark', Numpad2: 'ember', Numpad3: 'frost' };
+const TOWER_KEYS = { Digit1: 'spark', Digit2: 'ember', Digit3: 'frost', Digit4: 'volt', Numpad1: 'spark', Numpad2: 'ember', Numpad3: 'frost', Numpad4: 'volt' };
+const DIFFICULTY_KEYS = { KeyC: 'chill', KeyN: 'normal', KeyE: 'ember' };
 
 export function createInput(canvas, toField) {
   let actions = 0;
   let towerKey = null;
+  let difficultyKey = null;
   let click = null; // {x, y} in field coordinates, taken once
   let hover = { x: -9999, y: -9999 };
 
@@ -35,6 +37,8 @@ export function createInput(canvas, toField) {
       if (!event.repeat) actions |= ACTION_SPEED;
     } else if (TOWER_KEYS[event.code]) {
       if (!event.repeat) towerKey = TOWER_KEYS[event.code];
+    } else if (DIFFICULTY_KEYS[event.code]) {
+      if (!event.repeat) difficultyKey = DIFFICULTY_KEYS[event.code];
     } else return;
     event.preventDefault();
   });
@@ -59,6 +63,11 @@ export function createInput(canvas, toField) {
     takeTowerKey() {
       const key = towerKey;
       towerKey = null;
+      return key;
+    },
+    takeDifficultyKey() {
+      const key = difficultyKey;
+      difficultyKey = null;
       return key;
     },
     takeClick() {

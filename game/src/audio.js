@@ -67,6 +67,8 @@ export function createAudio() {
     coin() { tone(990, 0.09, 'sine', 0.05, 1320); },
     leak() { tone(220, 0.4, 'sawtooth', 0.12, 55); noise(0.25, 0.08, 400); },
     build() { tone(330, 0.1, 'triangle', 0.09, 495); tone(495, 0.12, 'triangle', 0.07, 660); },
+    zap() { tone(1400, 0.09, 'square', 0.05, 300); },
+    combo() { tone(660, 0.08, 'sine', 0.07, 990); tone(990, 0.12, 'sine', 0.07, 1320); },
     upgrade() { tone(440, 0.1, 'triangle', 0.08, 660); tone(660, 0.14, 'triangle', 0.08, 880); },
     wave() { tone(196, 0.35, 'triangle', 0.10, 196); tone(294, 0.35, 'triangle', 0.08, 294); },
     win() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.3, 'triangle', 0.10), i * 140)); },

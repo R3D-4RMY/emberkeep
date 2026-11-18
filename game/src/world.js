@@ -3,7 +3,7 @@
 // step and returns what happened as bit flags, so the caller can react (sound, announcements)
 // without the world knowing about screens. Nothing here allocates after createWorld returns.
 import {
-  ENEMIES, FIELD, LANTERN, MAX_LEVEL, PADS, PATH, POOL, START, TOWERS,
+  DIFFICULTY, ENEMIES, FIELD, LANTERN, MAX_LEVEL, PADS, PATH, POOL, START, TOWERS, TOWER_ORDER,
   WAVES, waveBonus, waveComposition, waveHpScale,
 } from './config.js';
 
@@ -15,6 +15,13 @@ export const EVENT_LOST = 16;
 export const EVENT_BUILD = 32;
 export const EVENT_UPGRADE = 64;
 export const EVENT_SELL = 128;
+export const EVENT_CHAIN = 256;
+export const EVENT_COMBO = 512;
+
+/** Combo multiplier: +5% score per consecutive kill, capped at x2.0 (20 kills). */
+export function comboMult(combo) {
+  return 1 + Math.min(combo, 20) * 0.05;
+}
 
 export function towerDamage(type, level) {
   return TOWERS[type].damage * (1 + 0.6 * (level - 1));
@@ -40,7 +47,7 @@ export function createWorld(random) {
   }
   const projectiles = [];
   for (let i = 0; i < POOL.projectiles; i += 1) {
-    projectiles.push({ active: false, x: 0, y: 0, tx: 0, ty: 0, target: null, type: 'spark', damage: 0, splash: 0, slow: 0, slowTime: 0, speed: 0 });
+    projectiles.push({ active: false, x: 0, y: 0, tx: 0, ty: 0, target: null, type: 'spark', damage: 0, splash: 0, slow: 0, slowTime: 0, speed: 0, chain: 0, chainLeft: 0 });
   }
   const particles = [];
   for (let i = 0; i < POOL.particles; i += 1) {
@@ -57,7 +64,17 @@ export function createWorld(random) {
     gold: START.gold, lives: START.lives, score: 0, kills: 0,
     wave: 0, waveActive: false, waveQueue: [], spawnTimer: 0, spawnGap: 0.7,
     time: 0, won: false, lost: false, buildPhase: true,
+    difficulty: 'normal',
+    combo: 0, comboTimer: 0, comboBest: 0, comboMilestone: 0,
+    shake: 0,
+    waveStats: [], waveKills: 0, waveLeaks: 0, waveGold: 0, waveScore: 0,
   };
+
+  /** Difficulty applies from the next reset (the title screen picks it before play). */
+  function setDifficulty(key) {
+    if (DIFFICULTY[key]) state.difficulty = key;
+    return state.difficulty;
+  }
 
   function reset() {
     for (const e of enemies) e.active = false;
@@ -65,7 +82,7 @@ export function createWorld(random) {
     for (const p of particles) p.active = false;
     for (const t of texts) t.active = false;
     for (const t of towers) { t.type = null; t.level = 0; t.cooldown = 0; t.invested = 0; t.flash = 0; }
-    state.gold = START.gold;
+    state.gold = DIFFICULTY[state.difficulty].gold;
     state.lives = START.lives;
     state.score = 0;
     state.kills = 0;
@@ -77,6 +94,9 @@ export function createWorld(random) {
     state.won = false;
     state.lost = false;
     state.buildPhase = true;
+    state.combo = 0; state.comboTimer = 0; state.comboBest = 0; state.comboMilestone = 0;
+    state.shake = 0;
+    state.waveStats = []; state.waveKills = 0; state.waveLeaks = 0; state.waveGold = 0; state.waveScore = 0;
   }
 
   function freeEnemy() {
@@ -113,10 +133,11 @@ export function createWorld(random) {
     const e = freeEnemy();
     if (!e) return;
     const def = ENEMIES[kind];
+    const diff = DIFFICULTY[state.difficulty];
     e.active = true; e.kind = kind;
     e.x = PATH[0].x; e.y = PATH[0].y;
-    e.maxHp = Math.round(def.hp * hpScale); e.hp = e.maxHp;
-    e.speed = def.speed * (0.95 + random() * 0.1); e.radius = def.radius;
+    e.maxHp = Math.round(def.hp * hpScale * diff.hp); e.hp = e.maxHp;
+    e.speed = def.speed * diff.speed * (0.95 + random() * 0.1); e.radius = def.radius;
     e.reward = def.reward; e.leak = def.leak;
     e.slow = 0; e.slowTime = 0; e.seg = 0; e.progress = 0; e.flash = 0;
   }
@@ -124,6 +145,7 @@ export function createWorld(random) {
   function startWave() {
     if (state.waveActive || state.won || state.lost || state.wave >= WAVES) return false;
     state.wave += 1;
+    state.waveKills = 0; state.waveLeaks = 0; state.waveGold = 0; state.waveScore = 0;
     const comp = waveComposition(state.wave);
     const queue = [];
     // Interleave kinds so the wave reads as a mixed march, not one blob per kind.
@@ -176,17 +198,34 @@ export function createWorld(random) {
     return true;
   }
 
-  /** Spend gold the way a sensible player would: fill empty pads, then upgrade. */
+  /** Spend gold the way a sensible player would: one of each tower first, then fill
+   * the pads with the type owned least (cheapest breaks ties), then upgrade cheapest. */
   function autoSpend() {
-    const order = ['spark', 'ember', 'frost', 'spark', 'ember', 'spark', 'frost', 'ember'];
-    let bought = 0;
-    for (const type of order) {
-      if (state.gold < TOWERS[type].cost) continue;
-      // Prefer pads near the middle bends of the road.
+    const bestPad = () => {
       const empty = towers.filter((t) => !t.type);
-      if (empty.length === 0) break;
+      if (empty.length === 0) return null;
       empty.sort((a, b) => Math.abs(a.x - 640) - Math.abs(b.x - 640));
-      if (buildTower(empty[0].pad, type)) bought += 1;
+      return empty[0];
+    };
+    let bought = 0;
+    for (const type of ['spark', 'ember', 'frost', 'volt']) {
+      if (towers.some((t) => t.type === type)) continue;
+      const pad = bestPad();
+      if (!pad || state.gold < TOWERS[type].cost) continue;
+      if (buildTower(pad.pad, type)) bought += 1;
+    }
+    for (;;) {
+      const pad = bestPad();
+      if (!pad) break;
+      const affordable = TOWER_ORDER.filter((k) => state.gold >= TOWERS[k].cost);
+      if (affordable.length === 0) break;
+      affordable.sort((a, b) => {
+        const ca = towers.filter((t) => t.type === a).length;
+        const cb = towers.filter((t) => t.type === b).length;
+        return ca - cb || TOWERS[a].cost - TOWERS[b].cost;
+      });
+      if (!buildTower(pad.pad, affordable[0])) break;
+      bought += 1;
     }
     let upgraded = true;
     while (upgraded) {
@@ -200,28 +239,79 @@ export function createWorld(random) {
     return bought;
   }
 
-  function damageEnemy(e, amount, events) {
-    e.hp -= amount;
+  function damageEnemy(e, amount, events, sourceType) {
+    // Bulwarks shrug off part of one tower type's damage (frost).
+    const shield = sourceType && ENEMIES[e.kind].shieldVs ? (ENEMIES[e.kind].shieldVs[sourceType] ?? 1) : 1;
+    const dealt = Math.max(1, Math.round(amount * shield));
+    e.hp -= dealt;
     e.flash = 0.12;
+    // Bosses show their damage and shake the screen when hit.
+    if (e.kind === 'golem' || e.kind === 'warden') {
+      floatText(e.x + (random() * 24 - 12), e.y - e.radius - 12, `-${dealt}`, '#fca5a5');
+      state.shake = Math.max(state.shake, e.kind === 'golem' ? 7 : 5);
+    }
     if (e.hp > 0) return events;
     e.active = false;
     state.kills += 1;
-    state.score += 10 + state.wave * 2;
-    state.gold += e.reward;
-    floatText(e.x, e.y - e.radius - 6, `+${e.reward}g`, '#f2c94c');
+    state.waveKills += 1;
+    // Combo: consecutive kills within 2.5 s raise the multiplier (score and a gold bonus).
+    state.combo = state.comboTimer > 0 ? state.combo + 1 : 1;
+    state.comboTimer = 2.5;
+    if (state.combo > state.comboBest) state.comboBest = state.combo;
+    const mult = comboMult(state.combo);
+    const scoreGain = Math.round((10 + state.wave * 2) * mult);
+    const bonusGold = Math.floor(e.reward * (mult - 1) * 0.5);
+    state.score += scoreGain;
+    state.waveScore += scoreGain;
+    state.gold += e.reward + bonusGold;
+    state.waveGold += e.reward + bonusGold;
+    floatText(e.x, e.y - e.radius - 6, `+${e.reward + bonusGold}g`, '#f2c94c');
     burst(e.x, e.y, ENEMIES[e.kind].color, e.kind === 'golem' ? 26 : 9, 130);
     events |= EVENT_KILL;
+    for (const milestone of [5, 10, 15, 20]) {
+      if (state.combo === milestone && state.comboMilestone < milestone) {
+        state.comboMilestone = milestone;
+        events |= EVENT_COMBO;
+        floatText(e.x, e.y - e.radius - 30, `COMBO x${mult.toFixed(2)}!`, '#fde047');
+      }
+    }
     if (ENEMIES[e.kind].splits) {
+      const diff = DIFFICULTY[state.difficulty];
       for (let i = 0; i < ENEMIES[e.kind].splits; i += 1) {
         const m = freeEnemy();
         if (!m) break;
         const def = ENEMIES.mote;
         m.active = true; m.kind = 'mote';
         m.x = e.x + (i === 0 ? -14 : 14); m.y = e.y;
-        m.maxHp = Math.round(def.hp * waveHpScale(state.wave) * 0.6); m.hp = m.maxHp;
-        m.speed = def.speed; m.radius = def.radius; m.reward = def.reward; m.leak = def.leak;
+        m.maxHp = Math.round(def.hp * waveHpScale(state.wave) * diff.hp * 0.6); m.hp = m.maxHp;
+        m.speed = def.speed * diff.speed; m.radius = def.radius; m.reward = def.reward; m.leak = def.leak;
         m.slow = 0; m.slowTime = 0; m.seg = e.seg; m.progress = e.progress; m.flash = 0;
       }
+    }
+    return events;
+  }
+
+  /** Volt Coil chain: after the primary hit, lightning jumps to nearby enemies. */
+  function chainLightning(fromEnemy, damage, chainLeft, chainRange, events) {
+    let from = fromEnemy;
+    let dmg = damage;
+    let left = chainLeft;
+    while (left > 0) {
+      let best = null;
+      let bestD = Infinity;
+      for (const e of enemies) {
+        if (!e.active || e === from) continue;
+        const d = dist(from.x, from.y, e.x, e.y);
+        if (d <= chainRange + e.radius && d < bestD) { bestD = d; best = e; }
+      }
+      if (!best) break;
+      dmg = Math.max(1, Math.round(dmg * TOWERS.volt.chainFalloff));
+      burst(best.x, best.y, TOWERS.volt.color, 4, 80);
+      floatText(best.x, best.y - best.radius - 8, `-${dmg}`, '#fde047');
+      events = damageEnemy(best, dmg, events, 'volt');
+      events |= EVENT_CHAIN;
+      from = best;
+      left -= 1;
     }
     return events;
   }
@@ -229,6 +319,11 @@ export function createWorld(random) {
   function step(dt) {
     let events = 0;
     state.time += dt;
+    if (state.comboTimer > 0) {
+      state.comboTimer -= dt;
+      if (state.comboTimer <= 0) state.combo = 0;
+    }
+    if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 16);
 
     // Spawning.
     if (state.waveActive && state.waveQueue.length > 0) {
@@ -261,6 +356,7 @@ export function createWorld(random) {
       if (e.seg >= PATH.length - 1 && e.x >= LANTERN.x - 4) {
         e.active = false;
         state.lives -= e.leak;
+        state.waveLeaks += e.leak;
         burst(LANTERN.x, LANTERN.y, '#ff6b35', 14, 160);
         events |= EVENT_LEAK;
         if (state.lives <= 0) {
@@ -297,6 +393,8 @@ export function createWorld(random) {
           p.slow = TOWERS[t.type].slow || 0;
           p.slowTime = TOWERS[t.type].slowTime || 0;
           p.speed = TOWERS[t.type].projectileSpeed;
+          p.chain = TOWERS[t.type].chain || 0;
+          p.chainLeft = t.type === 'volt' ? t.level : 0;
           t.cooldown = 1 / towerRate(t.type, t.level);
           t.flash = 0.08;
         }
@@ -317,7 +415,7 @@ export function createWorld(random) {
           burst(p.tx, p.ty, '#ff6b35', 10, 120);
           for (const e of enemies) {
             if (!e.active) continue;
-            if (dist(p.tx, p.ty, e.x, e.y) <= p.splash + e.radius) events = damageEnemy(e, p.damage, events);
+            if (dist(p.tx, p.ty, e.x, e.y) <= p.splash + e.radius) events = damageEnemy(e, p.damage, events, p.type);
           }
         } else if (p.target && p.target.active) {
           const e = p.target;
@@ -327,7 +425,10 @@ export function createWorld(random) {
             e.slowTime = Math.max(e.slowTime, p.slowTime);
           }
           burst(e.x, e.y, TOWERS[p.type].color, 3, 60);
-          events = damageEnemy(e, p.damage, events);
+          events = damageEnemy(e, p.damage, events, p.type);
+          if (p.type === 'volt' && p.chainLeft > 0) {
+            events = chainLightning(e, p.damage, p.chainLeft, p.chain, events);
+          }
         }
       } else {
         p.x += (dx / d) * move;
@@ -356,6 +457,9 @@ export function createWorld(random) {
       const bonus = waveBonus(state.wave);
       state.gold += bonus;
       state.score += 100 * state.wave;
+      state.waveGold += bonus;
+      state.waveScore += 100 * state.wave;
+      state.waveStats.push({ wave: state.wave, kills: state.waveKills, leaks: state.waveLeaks, gold: state.waveGold, score: state.waveScore });
       floatText(LANTERN.x - 60, LANTERN.y - 60, `Wave ${state.wave} clear! +${bonus}g`, '#f2c94c');
       events |= EVENT_WAVE_CLEAR;
       if (state.wave >= WAVES && !state.lost) {
@@ -369,5 +473,5 @@ export function createWorld(random) {
   }
 
   reset();
-  return { state, reset, step, startWave, buildTower, upgradeTower, sellTower, autoSpend };
+  return { state, reset, step, startWave, buildTower, upgradeTower, sellTower, autoSpend, setDifficulty };
 }

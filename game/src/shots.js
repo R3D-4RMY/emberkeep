@@ -26,14 +26,29 @@ function playWaves(world, targetWave, maxSeconds) {
 export function stageShot(name, world) {
   world.reset();
   if (name === 'play') {
-    // A few towers up, mid-wave 3, enemies on the road.
+    // Clear waves 1-3, plant a Volt Coil if none stands, then play wave 4 partway
+    // until the combo meter is lit — the frame shows the new tower and the combo HUD.
     world.autoSpend();
-    playWaves(world, 3, 90);
+    playWaves(world, 3, 240);
+    if (!world.state.towers.some((t) => t.type === 'volt')) {
+      world.state.gold = Math.max(world.state.gold, 120);
+      const empty = [...world.state.towers].filter((t) => !t.type).sort((a, b) => Math.abs(a.x - 640) - Math.abs(b.x - 640))[0];
+      if (empty) world.buildTower(empty.pad, 'volt');
+    }
+    world.autoSpend();
+    world.startWave();
+    for (let i = 0; i < 60 / STEP; i += 1) {
+      const s = world.state;
+      if (s.lost || s.won || !s.waveActive) break;
+      world.step(STEP);
+      if (s.combo >= 5 && s.enemies.some((e) => e.active)) break;
+    }
     return { screen: SCREEN_PLAY, best: world.state.score };
   }
   if (name === 'boss') {
     // Waves 1-9 cleared, then wave 10 in progress with the Ember Golem on the road.
-    playWaves(world, 9, 600);
+    // (Clearing nine waves takes ~620 s of game time, so the cap sits above that.)
+    playWaves(world, 9, 900);
     world.autoSpend();
     world.startWave();
     for (let i = 0; i < 150 / STEP; i += 1) {
